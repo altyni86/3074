@@ -12,6 +12,14 @@ contract Callee {
     }
 }
 
+contract ForceSend {
+    constructor() payable {}
+
+    function destroy(address payable target) external {
+        selfdestruct(target);
+    }
+}
+
 contract BatchInvokerTest is Test {
     Callee public callee;
     BatchInvoker public invoker;
@@ -78,6 +86,24 @@ contract BatchInvokerTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = constructAndSignBatch(0, 1 ether);
         vm.expectRevert(abi.encodeWithSelector(BatchInvoker.ExtraValue.selector));
         invoker.execute{value: 2 ether}(batch, v, r, s);
+    }
+
+    function test_invalidSignature() public {
+        (uint8 v, bytes32 r, bytes32 s) = constructAndSignBatch(0, 0);
+        r = bytes32(uint256(r) ^ 1);
+        vm.expectRevert(BatchInvoker.InvalidSignature.selector);
+        invoker.execute(batch, v, r, s);
+    }
+
+    function test_forcedBalanceDoesNotBrickInvoker() public {
+        ForceSend force = new ForceSend{value: 1 ether}();
+        force.destroy(payable(address(invoker)));
+        assertEq(address(invoker).balance, 1 ether);
+
+        (uint8 v, bytes32 r, bytes32 s) = constructAndSignBatch(0, 0);
+        invoker.execute(batch, v, r, s);
+
+        assertEq(address(invoker).balance, 1 ether);
     }
 
     // TODO: test that auth returns authority address

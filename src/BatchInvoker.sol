@@ -43,7 +43,11 @@ contract BatchInvoker is Auth {
     error InvalidNonce(address authority, uint256 expected, uint256 attempted);
 
     /// @notice thrown when a Batch is executed with a larger `msg.value` than the sum of each sub-call's `value`
+    /// @dev also used when the Batch attempts to spend existing contract balance
     error ExtraValue();
+
+    /// @notice thrown when signature recovery fails
+    error InvalidSignature();
 
     /// @notice produce a signable digest that empowers this BatchInvoker to execute the Batch on behalf of the signing authority using AUTHCALL
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
@@ -64,8 +68,10 @@ contract BatchInvoker is Auth {
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
     /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(batch)
     function execute(Batch calldata batch, uint8 v, bytes32 r, bytes32 s) public payable {
+        uint256 startingBalance = address(this).balance - msg.value;
         // AUTH this contract to execute the Batch on behalf of the authority
         address authority = auth(getCommit(batch), v, r, s);
+        if (authority == address(0)) revert InvalidSignature();
         // validate the nonce & increment
         uint256 expectedNonce = nextNonce[authority]++;
         if (expectedNonce != batch.nonce) revert InvalidNonce(authority, expectedNonce, batch.nonce);
@@ -74,7 +80,7 @@ contract BatchInvoker is Auth {
             exec(batch.calls[i]);
         }
         // ensure that all value passed to the transaction was passed on to sub-calls (no leftover value in BatchInvoker contract)
-        if (address(this).balance != 0) revert ExtraValue();
+        if (address(this).balance != startingBalance) revert ExtraValue();
     }
 
     /// @notice execute a single Call. revert if it fails.
