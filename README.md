@@ -5,6 +5,8 @@ This repo contains
 - contract`Auth`, which exposes basic usage of `AUTH` and `AUTHCALL` via inline assembly
 - contract `BatchInvoker`, which illustrates an implementation of a safe Invoker contract which executes simple batched calls
 
+For a full description of the Batch Invoker standard, including digest formats, execution invariants, and security considerations, see `docs/standard.md`.
+
 
 ## Todo
 - [x] implement 3074 in geth - [WIP](https://github.com/ethereum/go-ethereum/pull/28615)
