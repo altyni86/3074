@@ -3,6 +3,7 @@ pragma solidity ^0.8.13;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BatchInvoker} from "../src/BatchInvoker.sol";
+import {Auth} from "../src/Auth.sol";
 
 contract Callee {
     error UnexpectedSender(address expected, address actual);
@@ -81,4 +82,23 @@ contract BatchInvokerTest is Test {
     }
 
     // TODO: test that auth returns authority address
+
+    // test that invalid signature (zero v,r,s) reverts with InvalidSignature
+    function test_invalidSignature() public {
+        batch.nonce = 0;
+        batch.calls.push(
+            BatchInvoker.Call({
+                to: address(callee),
+                data: abi.encodeWithSelector(Callee.expectSender.selector, address(invoker)),
+                value: 0,
+                gasLimit: 10_000
+            })
+        );
+        // use invalid signature values that will cause ecrecover to return address(0)
+        uint8 v = 0;
+        bytes32 r = bytes32(0);
+        bytes32 s = bytes32(0);
+        vm.expectRevert(abi.encodeWithSelector(Auth.InvalidSignature.selector));
+        invoker.execute(batch, v, r, s);
+    }
 }

@@ -5,6 +5,9 @@ abstract contract Auth {
     /// @notice magic byte to disambiguate EIP-3074 signature payloads
     uint8 constant MAGIC = 0x04;
 
+    /// @notice thrown when ecrecover returns address(0), indicating an invalid signature
+    error InvalidSignature();
+
     /// @notice produce a digest for the authorizer to sign
     /// @param commit - any 32-byte value used to commit to transaction validity conditions
     /// @return digest - sign the `digest` to authorize the invoker to execute the `calls`
@@ -28,6 +31,8 @@ abstract contract Auth {
         bytes32 digest = getDigest(commit);
         // derive authority from the signature + digest
         authority = ecrecover(digest, v, r, s);
+        // ecrecover returns address(0) for invalid signatures - this must be checked
+        if (authority == address(0)) revert InvalidSignature();
         // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
     }
 
