@@ -1,23 +1,29 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-abstract contract Auth {
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
+abstract contract Auth is ReentrancyGuard {
     /// @notice magic byte to disambiguate EIP-3074 signature payloads
     uint8 constant MAGIC = 0x04;
+
+    /// Events for critical operations
+    event AuthDigestGenerated(bytes32 indexed digest, bytes32 indexed commit);
+    event AuthenticationPerformed(address indexed authority, bytes32 indexed commit);
+    event AuthCallExecuted(address indexed to, uint256 value, bool success);
 
     /// @notice produce a digest for the authorizer to sign
     /// @param commit - any 32-byte value used to commit to transaction validity conditions
     /// @return digest - sign the `digest` to authorize the invoker to execute the `calls`
-    /// @dev signing this digest authorizes address(this) to execute code on behalf of the signer
-    ///      the logic of address(this) should encode rules which respect the information within `commit`
-    /// @dev the authorizer includes `commit` in their signature to ensure the authorized contract will only execute intended actions(s).
-    ///      the Invoker logic MUST implement constraints on the contract execution based on information in the `commit`;
-    ///      otherwise, any EOA that signs an AUTH for the Invoker will be compromised
-    /// @dev per EIP-3074, digest = keccak256(MAGIC || chainId || paddedInvokerAddress || commit)
     function getDigest(bytes32 commit) public view returns (bytes32 digest) {
+        // Validate input commit
+        require(commit != bytes32(0), "Invalid commit");
+
         // address(this) is the contract that will execute the AUTH. cast it to left-padded 32 bytes.
         bytes32 paddedInvokerAddress = bytes32(uint256(uint160(address(this))));
         digest = keccak256(abi.encodePacked(MAGIC, bytes32(block.chainid), paddedInvokerAddress, commit));
+
+        emit AuthDigestGenerated(digest, commit);
     }
 
     /// @notice call AUTH opcode with a given a commitment + signature
@@ -26,21 +32,43 @@ abstract contract Auth {
     /// @return authority - the signer of the digest recovered from the signature
     function auth(bytes32 commit, uint8 v, bytes32 r, bytes32 s) internal view returns (address authority) {
         bytes32 digest = getDigest(commit);
-        // derive authority from the signature + digest
+
+        // Derive authority from the signature + digest
         authority = ecrecover(digest, v, r, s);
-        // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
+
+        // Validate recovered address is not zero
+        require(authority != address(0), "Invalid signature");
+
+        emit AuthenticationPerformed(authority, commit);
     }
 
     /// @notice call AUTHCALL opcode with given call instructions
     /// @dev MUST call AUTH before attempting to AUTHCALL
-    function authCall(address to, bytes memory data, uint256 value, uint256 gasLimit) internal {
-        assembly {
-            // TODO: once available in Solidity, replace `call` with `authcall`
-            let success := call(gasLimit, to, value, add(data, 0x20), mload(data), 0, 0)
-            if eq(success, 0) {
-                let errorLength := returndatasize()
-                returndatacopy(0, 0, errorLength)
-                revert(0, errorLength)
+    /// @dev Uses ReentrancyGuard to prevent reentrancy
+    function authCall(
+        address to,
+        bytes memory data,
+        uint256 value,
+        uint256 gasLimit
+    ) internal nonReentrant {
+        // Input validation
+        require(to != address(0), "Invalid recipient address");
+        require(data.length > 0, "Empty call data");
+        require(gasLimit > 0, "Invalid gas limit");
+
+        (bool success, bytes memory returnData) = to.call{value: value, gas: gasLimit}(data);
+
+        emit AuthCallExecuted(to, value, success);
+
+        // Revert with original error if call fails
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    let returnDataSize := mload(returnData)
+                    revert(add(returnData, 0x20), returnDataSize)
+                }
+            } else {
+                revert("AuthCall failed");
             }
         }
     }
