@@ -20,6 +20,9 @@ abstract contract Auth {
         digest = keccak256(abi.encodePacked(MAGIC, bytes32(block.chainid), paddedInvokerAddress, commit));
     }
 
+    /// @notice thrown when signature recovery returns the zero address (invalid signature)
+    error InvalidSignature();
+
     /// @notice call AUTH opcode with a given a commitment + signature
     /// @param commit - any 32-byte value used to commit to transaction validity conditions
     /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(commit)
@@ -28,6 +31,8 @@ abstract contract Auth {
         bytes32 digest = getDigest(commit);
         // derive authority from the signature + digest
         authority = ecrecover(digest, v, r, s);
+        // ecrecover returns address(0) for invalid signatures - reject them
+        if (authority == address(0)) revert InvalidSignature();
         // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
     }
 

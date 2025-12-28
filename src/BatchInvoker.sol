@@ -15,8 +15,12 @@ import {Auth} from "./Auth.sol";
 contract BatchInvoker is Auth {
     /// @notice a Batch is an array of calls which will be executed behalf of an authority.
     /// @dev authority signs a commitment to the Batch, enabling it to be executed by the BatchInvoker using AUTHCALL
+    /// @param nonce - sequential nonce for replay protection
+    /// @param deadline - timestamp after which the batch is no longer valid (0 = no expiration)
+    /// @param calls - array of calls to execute
     struct Batch {
         uint256 nonce;
+        uint256 deadline;
         Call[] calls;
     }
 
@@ -45,6 +49,17 @@ contract BatchInvoker is Auth {
     /// @notice thrown when a Batch is executed with a larger `msg.value` than the sum of each sub-call's `value`
     error ExtraValue();
 
+    /// @notice thrown when a Batch is executed after its deadline has passed
+    /// @param deadline - the batch's expiration timestamp
+    /// @param currentTimestamp - the current block timestamp
+    error BatchExpired(uint256 deadline, uint256 currentTimestamp);
+
+    /// @notice emitted when a Batch is successfully executed
+    /// @param authority - the address that authorized the batch
+    /// @param nonce - the batch nonce
+    /// @param numCalls - the number of calls executed
+    event BatchExecuted(address indexed authority, uint256 indexed nonce, uint256 numCalls);
+
     /// @notice produce a signable digest that empowers this BatchInvoker to execute the Batch on behalf of the signing authority using AUTHCALL
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
     /// @return digest - the payload that the authority should sign in order to empower this BatchInvoker to execute the Batch using AUTHCALL
@@ -64,21 +79,31 @@ contract BatchInvoker is Auth {
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
     /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(batch)
     function execute(Batch calldata batch, uint8 v, bytes32 r, bytes32 s) public payable {
+        // validate deadline (0 means no expiration)
+        if (batch.deadline != 0 && block.timestamp > batch.deadline) {
+            revert BatchExpired(batch.deadline, block.timestamp);
+        }
         // AUTH this contract to execute the Batch on behalf of the authority
         address authority = auth(getCommit(batch), v, r, s);
         // validate the nonce & increment
         uint256 expectedNonce = nextNonce[authority]++;
         if (expectedNonce != batch.nonce) revert InvalidNonce(authority, expectedNonce, batch.nonce);
         // AUTHCALL each call in the batch
-        for (uint256 i; i < batch.calls.length; i++) {
-            exec(batch.calls[i]);
+        // gas optimization: cache array length and use unchecked increment
+        uint256 numCalls = batch.calls.length;
+        for (uint256 i; i < numCalls;) {
+            _execCall(batch.calls[i]);
+            unchecked { ++i; }
         }
         // ensure that all value passed to the transaction was passed on to sub-calls (no leftover value in BatchInvoker contract)
         if (address(this).balance != 0) revert ExtraValue();
+        // emit event for off-chain monitoring
+        emit BatchExecuted(authority, batch.nonce, numCalls);
     }
 
     /// @notice execute a single Call. revert if it fails.
-    function exec(Call memory call) internal {
+    /// @dev uses calldata for gas efficiency since call data is not modified
+    function _execCall(Call calldata call) internal {
         authCall(call.to, call.data, call.value, call.gasLimit);
     }
 }
