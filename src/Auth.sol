@@ -5,6 +5,12 @@ abstract contract Auth {
     /// @notice magic byte to disambiguate EIP-3074 signature payloads
     uint8 constant MAGIC = 0x04;
 
+    /// @notice secp256k1 curve order divided by 2, used for signature malleability check
+    uint256 constant SECP256K1_N_DIV_2 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
+
+    /// @notice thrown when a signature is invalid (zero address recovered or malleable signature)
+    error InvalidSignature();
+
     /// @notice produce a digest for the authorizer to sign
     /// @param commit - any 32-byte value used to commit to transaction validity conditions
     /// @return digest - sign the `digest` to authorize the invoker to execute the `calls`
@@ -25,9 +31,19 @@ abstract contract Auth {
     /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(commit)
     /// @return authority - the signer of the digest recovered from the signature
     function auth(bytes32 commit, uint8 v, bytes32 r, bytes32 s) internal view returns (address authority) {
+        // check for signature malleability - s must be in the lower half of the curve order
+        // this prevents signature malleability attacks where a valid signature can be transformed
+        // into another valid signature without knowing the private key
+        if (uint256(s) > SECP256K1_N_DIV_2) revert InvalidSignature();
+
         bytes32 digest = getDigest(commit);
         // derive authority from the signature + digest
         authority = ecrecover(digest, v, r, s);
+
+        // CRITICAL: ecrecover returns address(0) for invalid signatures
+        // Without this check, an attacker could execute batches on behalf of address(0)
+        if (authority == address(0)) revert InvalidSignature();
+
         // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
     }
 

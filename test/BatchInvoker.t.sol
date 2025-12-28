@@ -3,6 +3,7 @@ pragma solidity ^0.8.13;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BatchInvoker} from "../src/BatchInvoker.sol";
+import {Auth} from "../src/Auth.sol";
 
 contract Callee {
     error UnexpectedSender(address expected, address actual);
@@ -78,6 +79,50 @@ contract BatchInvokerTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = constructAndSignBatch(0, 1 ether);
         vm.expectRevert(abi.encodeWithSelector(BatchInvoker.ExtraValue.selector));
         invoker.execute{value: 2 ether}(batch, v, r, s);
+    }
+
+    // test that invalid signature is rejected (zero address recovery)
+    function test_invalidSignature() public {
+        batch.nonce = 0;
+        batch.calls.push(
+            BatchInvoker.Call({
+                to: address(callee),
+                data: abi.encodeWithSelector(Callee.expectSender.selector, address(invoker)),
+                value: 0,
+                gasLimit: 10_000
+            })
+        );
+        // use invalid signature values that will cause ecrecover to return address(0)
+        uint8 v = 27;
+        bytes32 r = bytes32(0);
+        bytes32 s = bytes32(0);
+        vm.expectRevert(Auth.InvalidSignature.selector);
+        invoker.execute(batch, v, r, s);
+    }
+
+    // test that malleable signatures (high-s) are rejected
+    function test_malleableSignature() public {
+        batch.nonce = 0;
+        batch.calls.push(
+            BatchInvoker.Call({
+                to: address(callee),
+                data: abi.encodeWithSelector(Callee.expectSender.selector, address(invoker)),
+                value: 0,
+                gasLimit: 10_000
+            })
+        );
+        bytes32 digest = invoker.getDigest(batch);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(authorityKey, digest);
+
+        // secp256k1 curve order
+        uint256 SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        // flip s to create a malleable signature (s' = n - s)
+        bytes32 highS = bytes32(SECP256K1_N - uint256(s));
+        // flip v to maintain valid signature
+        uint8 flippedV = v == 27 ? 28 : 27;
+
+        vm.expectRevert(Auth.InvalidSignature.selector);
+        invoker.execute(batch, flippedV, r, highS);
     }
 
     // TODO: test that auth returns authority address
