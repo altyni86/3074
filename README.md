@@ -40,3 +40,6 @@ $ forge fmt
 ```shell
 $ forge snapshot
 ```
+
+## Session Resume Test
+This change was made to test session resume in a new container on 2025-12-28.
