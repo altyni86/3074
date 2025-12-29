@@ -28,8 +28,23 @@ abstract contract Auth {
         bytes32 digest = getDigest(commit);
         // derive authority from the signature + digest
         authority = ecrecover(digest, v, r, s);
+
+        // Validate recovered address is not address(0)
+        if (authority == address(0)) {
+            revert InvalidSignature();
+        }
+
+        // Validate signature malleability (s-value in lower half of curve order)
+        uint256 constant SECP256K1_N_DIV_2 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
+        if (uint256(s) > SECP256K1_N_DIV_2) {
+            revert InvalidSignature();
+        }
+
         // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
     }
+
+    /// @notice Error to throw on invalid signature
+    error InvalidSignature();
 
     /// @notice call AUTHCALL opcode with given call instructions
     /// @dev MUST call AUTH before attempting to AUTHCALL
