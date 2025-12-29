@@ -66,19 +66,28 @@ contract BatchInvoker is Auth {
     function execute(Batch calldata batch, uint8 v, bytes32 r, bytes32 s) public payable {
         // AUTH this contract to execute the Batch on behalf of the authority
         address authority = auth(getCommit(batch), v, r, s);
-        // validate the nonce & increment
-        uint256 expectedNonce = nextNonce[authority]++;
+
+        // validate the nonce before storage update (cheaper revert path)
+        uint256 expectedNonce = nextNonce[authority];
         if (expectedNonce != batch.nonce) revert InvalidNonce(authority, expectedNonce, batch.nonce);
+        // increment nonce after validation (saves gas on revert)
+        nextNonce[authority] = expectedNonce + 1;
+
         // AUTHCALL each call in the batch
-        for (uint256 i; i < batch.calls.length; i++) {
+        // gas optimizations: cache length, use unchecked increment (overflow impossible)
+        uint256 callsLength = batch.calls.length;
+        for (uint256 i; i < callsLength;) {
             exec(batch.calls[i]);
+            unchecked { ++i; }
         }
+
         // ensure that all value passed to the transaction was passed on to sub-calls (no leftover value in BatchInvoker contract)
         if (address(this).balance != 0) revert ExtraValue();
     }
 
     /// @notice execute a single Call. revert if it fails.
-    function exec(Call memory call) internal {
+    /// @dev uses calldata to avoid memory copy overhead
+    function exec(Call calldata call) internal {
         authCall(call.to, call.data, call.value, call.gasLimit);
     }
 }

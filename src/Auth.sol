@@ -5,6 +5,13 @@ abstract contract Auth {
     /// @notice magic byte to disambiguate EIP-3074 signature payloads
     uint8 constant MAGIC = 0x04;
 
+    /// @notice cached invoker address as left-padded 32 bytes (gas optimization: computed once at deployment)
+    bytes32 internal immutable PADDED_INVOKER_ADDRESS;
+
+    constructor() {
+        PADDED_INVOKER_ADDRESS = bytes32(uint256(uint160(address(this))));
+    }
+
     /// @notice produce a digest for the authorizer to sign
     /// @param commit - any 32-byte value used to commit to transaction validity conditions
     /// @return digest - sign the `digest` to authorize the invoker to execute the `calls`
@@ -15,9 +22,7 @@ abstract contract Auth {
     ///      otherwise, any EOA that signs an AUTH for the Invoker will be compromised
     /// @dev per EIP-3074, digest = keccak256(MAGIC || chainId || paddedInvokerAddress || commit)
     function getDigest(bytes32 commit) public view returns (bytes32 digest) {
-        // address(this) is the contract that will execute the AUTH. cast it to left-padded 32 bytes.
-        bytes32 paddedInvokerAddress = bytes32(uint256(uint160(address(this))));
-        digest = keccak256(abi.encodePacked(MAGIC, bytes32(block.chainid), paddedInvokerAddress, commit));
+        digest = keccak256(abi.encodePacked(MAGIC, bytes32(block.chainid), PADDED_INVOKER_ADDRESS, commit));
     }
 
     /// @notice call AUTH opcode with a given a commitment + signature
