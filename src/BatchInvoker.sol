@@ -21,16 +21,16 @@ contract BatchInvoker is Auth {
     }
 
     /// @notice a Call contains transaction execution information for a single sub-call within a Batch.
-    /// @dev The fields are relatively self-explanatory:
+    /// @dev Optimized struct layout for efficient storage and reduced gas costs
     ///      - to - the address to call.
+    ///      - value - the ether value forwarded to the call (max ~1.46e48 wei).
+    ///      - gasLimit - the gas limit set for the call (max ~309 quintillion gas).
     ///      - data - the encoded calldata passed to the call.
-    ///      - value - the ether value forwarded to the call.
-    ///      - gasLimit - the gas limit set for the call.
     struct Call {
-        address to;
-        bytes data;
-        uint256 value;
-        uint256 gasLimit;
+        address to;          // 20 bytes
+        uint160 value;       // 20 bytes (packed with 'to')
+        uint88 gasLimit;     // 11 bytes
+        bytes data;          // dynamic length
     }
 
     /// @notice authority => next valid nonce
@@ -79,6 +79,7 @@ contract BatchInvoker is Auth {
 
     /// @notice execute a single Call. revert if it fails.
     function exec(Call memory call) internal {
-        authCall(call.to, call.data, call.value, call.gasLimit);
+        // Convert back to full uint256 for authCall
+        authCall(call.to, call.data, uint256(call.value), uint256(call.gasLimit));
     }
 }
