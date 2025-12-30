@@ -25,9 +25,39 @@ abstract contract Auth {
     /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(commit)
     /// @return authority - the signer of the digest recovered from the signature
     function auth(bytes32 commit, uint8 v, bytes32 r, bytes32 s) internal view returns (address authority) {
-        bytes32 digest = getDigest(commit);
-        // derive authority from the signature + digest
-        authority = ecrecover(digest, v, r, s);
+        assembly {
+            // Load the digest from the stack to memory
+            let digest := mload(0x40)
+            mstore(digest, commit)
+
+            // Perform inline keccak256 for getDigest
+            mstore(0x00, 0x04)              // MAGIC byte
+            mstore(0x01, chainid())          // Chain ID
+            // Padded invoker address (address(this) left-padded to 32 bytes)
+            mstore(0x20, shl(96, address()))
+            mstore(0x40, commit)
+
+            // Compute digest hash
+            let digestHash := keccak256(0x00, 0x60)
+
+            // Perform ecrecover using inline assembly
+            // Inputs: hash, v, r, s
+            let result := staticcall(gas(), 0x01,
+                0x00,               // Input pointer
+                0x80,               // Input size (digest + v + r + s)
+                0x00,               // Output pointer
+                0x20                // Output size (address length)
+            )
+
+            // Check ecrecover success
+            if iszero(result) {
+                // If ecrecover fails, revert
+                revert(0, 0)
+            }
+
+            // Return the recovered address
+            authority := mload(0x00)
+        }
         // TODO: once available in Solidity, call AUTH - pass in (authority, pointer to signature in memory)
     }
 
