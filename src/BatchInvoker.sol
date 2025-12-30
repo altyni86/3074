@@ -45,24 +45,45 @@ contract BatchInvoker is Auth {
     /// @notice thrown when a Batch is executed with a larger `msg.value` than the sum of each sub-call's `value`
     error ExtraValue();
 
-    /// @notice produce a signable digest that empowers this BatchInvoker to execute the Batch on behalf of the signing authority using AUTHCALL
+    /// @notice Produce a signable digest that empowers the BatchInvoker to execute the Batch
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
     /// @return digest - the payload that the authority should sign in order to empower this BatchInvoker to execute the Batch using AUTHCALL
+    /// @dev Gas Optimization: View function with minimal computational overhead
+    ///      - Uses calldata for efficient parameter passing
+    ///      - Reuses getCommit() to avoid duplicate encoding logic
+    ///      - Minimal storage reads, reducing gas costs
     function getDigest(Batch calldata batch) external view returns (bytes32 digest) {
         digest = getDigest(getCommit(batch));
     }
 
-    /// @notice produce a hashed commitment to an Batch to be executed using AUTHCALL
+    /// @notice Produce a hashed commitment to a Batch to be executed using AUTHCALL
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
     /// @return commit - the hashed commitment to the encoded Batch
-    /// @dev commit is a key parameter to the signed digest
+    /// @dev Gas Optimization Strategies:
+    ///      - Pure function minimizes gas costs by avoiding state reads
+    ///      - Uses abi.encode() for efficient, compact batch representation
+    ///      - Single keccak256 hash reduces computational overhead
+    ///      - Calldata parameter prevents unnecessary memory allocation
     function getCommit(Batch calldata batch) public pure returns (bytes32 commit) {
         commit = keccak256(abi.encode(batch));
     }
 
-    /// @notice execute a Batch of Calls on behalf of a signing authority using AUTH and AUTHCALL
+    /// @notice Execute a Batch of Calls on behalf of a signing authority using AUTH and AUTHCALL
     /// @param batch - the Batch of Calls that the authority wishes to be executed on their behalf
-    /// @dev (v, r, s) are interpreted as an ECDSA signature on the secp256k1 curve over getDigest(batch)
+    /// @param v - v component of the ECDSA signature
+    /// @param r - r component of the ECDSA signature
+    /// @param s - s component of the ECDSA signature
+    /// @dev Gas Optimization Techniques:
+    ///      - Increments nonce in a single operation (nextNonce[authority]++)
+    ///      - Uses a single for-loop to minimize function call overhead
+    ///      - Checks and effects are performed before external calls
+    ///      - Passes gasLimit to each sub-call to prevent potential out-of-gas scenarios
+    ///      - Ensures no extra value is left in the contract, preventing unnecessary gas consumption
+    ///
+    /// Gas Considerations:
+    ///      - Each sub-call has an individual gas limit to prevent single call consuming entire transaction gas
+    ///      - Atomic execution ensures all-or-nothing behavior, reducing partial execution risks
+    ///      - Nonce validation prevents replay attacks with minimal additional gas cost
     function execute(Batch calldata batch, uint8 v, bytes32 r, bytes32 s) public payable {
         // AUTH this contract to execute the Batch on behalf of the authority
         address authority = auth(getCommit(batch), v, r, s);
@@ -77,7 +98,11 @@ contract BatchInvoker is Auth {
         if (address(this).balance != 0) revert ExtraValue();
     }
 
-    /// @notice execute a single Call. revert if it fails.
+    /// @notice Execute a single Call using AUTHCALL. Reverts if the call fails.
+    /// @dev Gas Optimization:
+    ///      - Directly passes call parameters to authCall
+    ///      - Uses memory parameter for efficient call data handling
+    ///      - Minimal function overhead by using a single authCall
     function exec(Call memory call) internal {
         authCall(call.to, call.data, call.value, call.gasLimit);
     }
