@@ -1,0 +1,7 @@
+Why did the programmer quit his job?
+
+Because he didn't get arrays.
+
+(He wanted better data structures in his life!)
+
+-- Added a new line for testing diff view!
