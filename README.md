@@ -40,5 +40,3 @@ $ forge fmt
 ```shell
 $ forge snapshot
 ```
-
-<\!-- Test comment for Source Control verification -->
